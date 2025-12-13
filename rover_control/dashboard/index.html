@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rover Telemetry Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/openmct/dist/openmct.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roslib/build/roslib.min.js"></script>
+</head>
+<body>
+    <script>
+        // 1. CONFIGURATION: Set up OpenMCT
+        openmct.setAssetPath('openmct');
+        openmct.install(openmct.plugins.LocalStorage());
+        openmct.install(openmct.plugins.MyItems());
+        openmct.install(openmct.plugins.UTCTimeSystem());
+
+        // 2. CONNECTION: Connect to the ROS 2 Bridge (Task 3 Requirement)
+        // This connects to the 'rosbridge_server' we launched in system.launch.py
+        var ros = new ROSLIB.Ros({
+            url : 'ws://localhost:9090'
+        });
+
+        ros.on('connection', function() {
+            console.log('Connected to websocket server.');
+        });
+
+        // 3. TELEMETRY DEFINITION: Define the Camera Stats Object
+        openmct.objects.addRoot({
+            namespace: 'rover_telemetry',
+            key: 'camera_stats'
+        });
+
+        openmct.objects.addProvider({
+            get: function (identifier) {
+                if (identifier.key === 'camera_stats') {
+                    return Promise.resolve({
+                        identifier: identifier,
+                        name: 'Camera Health Stats',
+                        type: 'telemetry',
+                        telemetry: {
+                            values: [
+                                { key: 'fps', name: 'Frames Per Second', format: 'float', hints: { range: 1 } },
+                                { key: 'bandwidth_kbps', name: 'Bandwidth (Kbps)', format: 'integer' },
+                                { key: 'timestamp', name: 'Time', format: 'utc' }
+                            ]
+                        }
+                    });
+                }
+            }
+        });
+
+        // 4. DATA INGESTION: Listen to ROS Topic and feed OpenMCT
+        // We subscribe to '/camera/stats' which is published by image_stats_node.py
+        var listener = new ROSLIB.Topic({
+            ros : ros,
+            name : '/camera/stats',
+            messageType : 'std_msgs/String'
+        });
+
+        listener.subscribe(function(message) {
+            // Parse the JSON data sent from Python
+            var data = JSON.parse(message.data);
+            
+            // Push data into the dashboard
+            openmct.telemetry.addProvider({
+                subscribe: function (domainObject, callback) {
+                    callback({
+                        timestamp: data.timestamp * 1000, // Convert to ms
+                        fps: data.fps,
+                        bandwidth_kbps: data.bandwidth_kbps
+                    });
+                }
+            });
+        });
+
+        // 5. START: Launch the Dashboard
+        openmct.start();
+    </script>
+</body>
+</html>
